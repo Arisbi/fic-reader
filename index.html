@@ -898,13 +898,23 @@ function cleanHtml(raw) {
     const doc = parser.parseFromString(raw, 'text/html');
 
     // AO3-specific selectors first, then generic fallbacks
-    let root =
+    // For AO3: #chapters contains the actual story, not just the summary
+    const allUserstuff = doc.querySelectorAll('.userstuff');
+    let root = null;
+
+    // Pick the largest .userstuff block (that's the story content)
+    if (allUserstuff.length > 0) {
+      root = Array.from(allUserstuff).reduce((a, b) =>
+        a.textContent.length > b.textContent.length ? a : b
+      );
+    }
+
+    root = root ||
+      doc.querySelector('#chapters') ||
       doc.querySelector('#workskin') ||
-      doc.querySelector('.userstuff') ||
       doc.querySelector('[role="main"]') ||
       doc.querySelector('main') ||
       doc.querySelector('article') ||
-      doc.querySelector('.chapter') ||
       doc.body;
 
     if (!root) return '<p>No se pudo extraer el contenido.</p>';
