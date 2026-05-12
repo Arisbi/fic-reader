@@ -820,10 +820,11 @@ async function processFile(file) {
       content = await readText(file);
       content = txtToHtml(content);
     } else if (ext === 'html' || ext === 'htm') {
-      content = await readText(file);
-      content = cleanHtml(content);
-      const titleMatch = content.match(/<title[^>]*>([^<]+)<\/title>/i);
-      if (titleMatch) title = titleMatch[1].trim();
+      const raw = await readText(file);
+      // Extract title from raw HTML before cleaning
+      const titleMatch = raw.match(/<title[^>]*>([^<]+)<\/title>/i);
+      if (titleMatch) title = titleMatch[1].replace(/\s*[:\-–|]\s*(An Archive.*|AO3|Archive of Our Own).*/i, '').trim();
+      content = cleanHtml(raw);
     } else if (ext === 'epub') {
       content = await readEpub(file);
     } else if (ext === 'pdf') {
@@ -851,7 +852,7 @@ async function processFile(file) {
     renderLibrary();
     showToast(`"${title}" agregado ✦`);
   } catch (err) {
-    showToast('Error al leer el archivo 😓');
+    showToast('Error: ' + (err.message || 'No se pudo leer') + ' 😓');
     console.error(err);
   }
   hideLoading();
@@ -891,31 +892,62 @@ function txtToHtml(text) {
 }
 
 function cleanHtml(raw) {
-  // Extract body content
-  const bodyMatch = raw.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
-  let content = bodyMatch ? bodyMatch[1] : raw;
-  
-  // Remove scripts, styles, nav, header, footer
-  content = content.replace(/<script[\s\S]*?<\/script>/gi, '');
-  content = content.replace(/<style[\s\S]*?<\/style>/gi, '');
-  content = content.replace(/<nav[\s\S]*?<\/nav>/gi, '');
-  content = content.replace(/<header[\s\S]*?<\/header>/gi, '');
-  content = content.replace(/<footer[\s\S]*?<\/footer>/gi, '');
-  content = content.replace(/<form[\s\S]*?<\/form>/gi, '');
-  
-  // Keep meaningful tags, remove attributes (except basic ones)
-  content = content.replace(/<(p|h[1-6]|em|strong|i|b|br|hr|blockquote|div|span|a)[^>]*>/gi, (m, tag) => {
-    if (tag === 'a') return '<span>';
-    if (tag === 'div' || tag === 'span') return '<p>';
-    return `<${tag}>`;
-  });
-  content = content.replace(/<\/(div|span|a)>/gi, '</p>');
-  
-  // Clean up empty tags
-  content = content.replace(/<p>\s*<\/p>/gi, '');
-  content = content.replace(/(<br\s*\/?>\s*){3,}/gi, '<hr>');
-  
-  return content;
+  try {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(raw, 'text/html');
+
+    // AO3-specific selectors first, then generic fallbacks
+    let root =
+      doc.querySelector('#workskin') ||
+      doc.querySelector('.userstuff') ||
+      doc.querySelector('[role="main"]') ||
+      doc.querySelector('main') ||
+      doc.querySelector('article') ||
+      doc.querySelector('.chapter') ||
+      doc.body;
+
+    if (!root) return '<p>No se pudo extraer el contenido.</p>';
+
+    // Remove noise
+    [
+      'script','style','nav','header','footer','form',
+      '.header','#header','.footer','#footer',
+      '#navigation','#chapter-index','.chapter-index',
+      '#admin-banner','.flash','.actions',
+      '.bookmark','.kudos','#comments',
+      '#kudos-summary','.work-meta',
+    ].forEach(sel => {
+      try { root.querySelectorAll(sel).forEach(el => el.remove()); } catch(e) {}
+    });
+
+    // Get clean innerHTML
+    let html = root.innerHTML;
+
+    // Strip attributes from safe tags
+    html = html.replace(/<(p|h[1-6]|em|strong|i|b|br|hr|blockquote)(\s[^>]*)?>/gi, '<$1>');
+    // Convert block elements to paragraphs
+    html = html.replace(/<(div|section|article|main|aside)(\s[^>]*)?>/gi, '<p>');
+    html = html.replace(/<\/(div|section|article|main|aside)>/gi, '</p>');
+    // Remove links but keep text
+    html = html.replace(/<a[^>]*>/gi, '');
+    html = html.replace(/<\/a>/gi, '');
+    // Remove spans
+    html = html.replace(/<span[^>]*>/gi, '');
+    html = html.replace(/<\/span>/gi, '');
+    // Clean up
+    html = html.replace(/<p>\s*<\/p>/gi, '');
+    html = html.replace(/(<br\s*\/?>\s*){3,}/gi, '<hr>');
+
+    return html.trim() || '<p>No se encontró texto en este archivo.</p>';
+  } catch(e) {
+    // Regex fallback
+    const bodyMatch = raw.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+    let content = bodyMatch ? bodyMatch[1] : raw;
+    content = content.replace(/<script[\s\S]*?<\/script>/gi, '');
+    content = content.replace(/<style[\s\S]*?<\/style>/gi, '');
+    content = content.replace(/<[^>]+>/g, ' ');
+    return content.split(/\n\n+/).map(p => p.trim() ? `<p>${p.trim()}</p>` : '').join('');
+  }
 }
 
 async function readEpub(file) {
