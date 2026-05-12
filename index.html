@@ -795,6 +795,7 @@
 <script>
 // ── STATE ──
 let library = JSON.parse(localStorage.getItem('ficLibrary') || '[]');
+let prefs = JSON.parse(localStorage.getItem('ficPrefs') || '{}');
 let currentFic = null;
 let barsVisible = true;
 
@@ -1182,8 +1183,6 @@ function goHome() {
 }
 
 // ── SETTINGS ──
-let prefs = JSON.parse(localStorage.getItem('ficPrefs') || '{}');
-
 function openSettings() {
   document.getElementById('settingsOverlay').classList.add('open');
 }
